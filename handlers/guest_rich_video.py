@@ -135,24 +135,32 @@ def build_media_rich_message(
 
     blocks = []
 
-    if len(photo_sources) > 1:
-        slideshow = build_photo_slideshow_rich_message(
-            photo_paths=photo_sources,
-            caption_text=caption_text if not video_sources else None,
-        )
-        blocks.extend(slideshow.blocks or [])
-    elif len(photo_sources) == 1 and not video_sources:
-        photo_block = InputRichBlockPhoto(
-            photo=InputMediaPhoto(media=_media_ref(photo_sources[0])),
-            caption=RichBlockCaption(text=caption_text) if caption_text else None,
-        )
-        blocks.append(photo_block)
+    # Preserve every image. Large posts are split into consecutive slideshow
+    # blocks instead of silently dropping everything after the tenth photo.
+    for offset in range(0, len(photo_sources), 10):
+        photo_batch = photo_sources[offset:offset + 10]
+        batch_caption = caption_text if offset == 0 else None
+        if len(photo_batch) > 1:
+            slideshow = build_photo_slideshow_rich_message(
+                photo_paths=photo_batch,
+                caption_text=batch_caption,
+            )
+            blocks.extend(slideshow.blocks or [])
+        elif photo_batch:
+            blocks.append(
+                InputRichBlockPhoto(
+                    photo=InputMediaPhoto(media=_media_ref(photo_batch[0])),
+                    caption=RichBlockCaption(text=batch_caption) if batch_caption else None,
+                )
+            )
 
     for index, video_source in enumerate(video_sources):
         details = build_video_details_rich_message(
             video_path=video_source,
             summary_text="▶️ Tap to expand video" if index == 0 else "▶️ Video",
-            caption_text=caption_text if len(video_sources) == 1 else None,
+            # For mixed posts the caption already belongs to the first photo
+            # or slideshow. Otherwise attach it to the first video Details.
+            caption_text=caption_text if not photo_sources and index == 0 else None,
         )
         blocks.extend(details.blocks or [])
 
