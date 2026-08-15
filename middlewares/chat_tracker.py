@@ -8,6 +8,7 @@ from aiogram.types import Chat, Message, User
 
 from app_context import db
 from services.logger import logger as logging
+from services.i18n import language_context, normalize_language
 from services.storage.db import DataBase
 
 
@@ -29,9 +30,27 @@ class ChatTrackerMiddleware(BaseMiddleware):
             await self._process_message(event)
 
         request_id = str(uuid.uuid4())[:12]
-        user_id = getattr(getattr(event, "from_user", None), "id", None)
-        with logging.context(request_id=request_id, flow="handler", user_id=user_id):
-            return await handler(event, data)
+        actor = getattr(event, "from_user", None)
+        user_id = getattr(actor, "id", None)
+        telegram_language = getattr(actor, "language_code", None)
+        language = normalize_language(telegram_language)
+        if user_id is not None and hasattr(self._db, "get_user_language"):
+            try:
+                language = await self._db.get_user_language(
+                    user_id,
+                    fallback=telegram_language,
+                )
+            except Exception as exc:
+                logging.warning(
+                    "Failed to resolve user language, using Telegram language: user_id=%s error=%s",
+                    user_id,
+                    exc,
+                )
+
+        data["language"] = language
+        with language_context(language):
+            with logging.context(request_id=request_id, flow="handler", user_id=user_id):
+                return await handler(event, data)
 
     async def _process_message(self, message: Message) -> None:
         chat = message.chat

@@ -620,7 +620,7 @@ async def download_music(message: types.Message, direct_url: Optional[str] = Non
 @router.callback_query(F.data.startswith("audio:youtube:"))
 async def download_youtube_mp3_callback(call: types.CallbackQuery):
     if not call.message:
-        await call.answer("Open the bot to download MP3", show_alert=True)
+        await call.answer(bm.open_bot_for_audio(), show_alert=True)
         return
 
     await call.answer()

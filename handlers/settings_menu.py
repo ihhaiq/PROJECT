@@ -192,7 +192,7 @@ async def change_setting(call: types.CallbackQuery):
                 getattr(getattr(call.message, "chat", None), "id", None),
                 exc,
             )
-            await call.answer("Couldn't update settings right now. Please try again later.", show_alert=True)
+            await call.answer(bm.settings_update_failed(), show_alert=True)
             return
         logging.exception(
             "Failed to refresh settings keyboard: field=%s user_id=%s chat_id=%s error=%s",
@@ -201,7 +201,7 @@ async def change_setting(call: types.CallbackQuery):
             getattr(getattr(call.message, "chat", None), "id", None),
             exc,
         )
-        await call.answer("Couldn't update settings right now. Please try again later.", show_alert=True)
+        await call.answer(bm.settings_update_failed(), show_alert=True)
 
 
 async def noop_callback(call: types.CallbackQuery):

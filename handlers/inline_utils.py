@@ -324,7 +324,7 @@ async def run_inline_send_callback(
     sender_fn: Callable[..., Awaitable[None]],
 ) -> None:
     if not call.inline_message_id:
-        await call.answer("This button works only in inline mode.", show_alert=True)
+        await call.answer(bm.inline_only_button(), show_alert=True)
         return
 
     token = call.data.removeprefix(prefix)

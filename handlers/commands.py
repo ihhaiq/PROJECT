@@ -10,6 +10,7 @@ import keyboards as kb
 import messages as bm
 from handlers.utils import get_bot_username, get_message_text
 from services.logger import logger as logging
+from services.i18n import normalize_language
 from services.stats.chart import (
     _send_stats_photo,
     _handle_stats_update,
@@ -91,7 +92,10 @@ async def send_welcome(message: types.Message):
     else:
         await user_mod.update_info(message)
 
-    lang = getattr(message.from_user, "language_code", None)
+    lang = await user_mod.db.get_user_language(
+        message.from_user.id,
+        fallback=getattr(message.from_user, "language_code", None),
+    )
     bot_username = await get_bot_username(user_mod.bot)
     await message.reply(
         bm.welcome_message(language=lang),
@@ -116,7 +120,10 @@ async def send_welcome(message: types.Message):
 
 async def send_help(message: types.Message):
     bot_username = await get_bot_username(user_mod.bot)
-    language = getattr(message.from_user, "language_code", None)
+    language = await user_mod.db.get_user_language(
+        message.from_user.id,
+        fallback=getattr(message.from_user, "language_code", None),
+    )
     await message.reply(
         bm.help_message(bot_username, language=language),
         reply_markup=kb.start_keyboard(bot_username, language=language),
@@ -128,9 +135,7 @@ async def switch_language(call: types.CallbackQuery):
     if not call.data or not call.data.startswith("set_lang:"):
         await call.answer()
         return
-    language = call.data.split(":", 1)[1].strip() or "en"
-    if language not in {"en", "ar"}:
-        language = "en"
+    language = normalize_language(call.data.split(":", 1)[1])
 
     await user_mod.db.upsert_chat(
         user_id=call.from_user.id,
@@ -140,6 +145,7 @@ async def switch_language(call: types.CallbackQuery):
         language=language,
         status="active",
     )
+    language = await user_mod.db.set_user_language(call.from_user.id, language)
 
     bot_username = await get_bot_username(user_mod.bot)
     try:
@@ -159,6 +165,9 @@ async def switch_language(call: types.CallbackQuery):
 
 async def handle_bot_membership(update: ChatMemberUpdated):
     chat = update.chat
+    actor_language = normalize_language(
+        getattr(getattr(update, "from_user", None), "language_code", None)
+    )
     new_status = update.new_chat_member.status
     old_status = getattr(update.old_chat_member, "status", None)
 
@@ -187,14 +196,14 @@ async def handle_bot_membership(update: ChatMemberUpdated):
             if became_member:
                 await user_mod.bot.send_message(
                     chat_id=chat_id,
-                    text=bm.join_group(chat_title),
+                    text=bm.join_group(chat_title, language=actor_language),
                     parse_mode="HTML",
                 )
 
             if became_admin:
                 await user_mod.bot.send_message(
                     chat_id=chat_id,
-                    text=bm.admin_rights_granted(chat_title),
+                    text=bm.admin_rights_granted(chat_title, language=actor_language),
                     parse_mode="HTML",
                 )
 

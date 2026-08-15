@@ -10,6 +10,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 
 import messages as bm
 from services.logger import logger as logging
+from services.i18n import is_arabic
 from services.download.queue import QueueTicket
 from utils.download_manager import (
     DownloadProgress,
@@ -468,28 +469,47 @@ def _format_bytes(num_bytes: int) -> str:
 
 
 def _format_eta(seconds: Optional[float]) -> str:
+    label = "المتبقي" if is_arabic() else "ETA"
     if seconds is None:
-        return "ETA: --:--"
+        return f"{label}: --:--"
     total = max(0, int(seconds))
     minutes, sec = divmod(total, 60)
     hours, minutes = divmod(minutes, 60)
     if hours > 0:
-        return f"ETA: {hours:02d}:{minutes:02d}:{sec:02d}"
-    return f"ETA: {minutes:02d}:{sec:02d}"
+        return f"{label}: {hours:02d}:{minutes:02d}:{sec:02d}"
+    return f"{label}: {minutes:02d}:{sec:02d}"
 
 
 def _format_eta_short(seconds: Optional[float]) -> str:
+    label = "المتبقي" if is_arabic() else "ETA"
     if seconds is None:
-        return "ETA --:--"
+        return f"{label} --:--"
     total = max(0, int(seconds))
     minutes, sec = divmod(total, 60)
     hours, minutes = divmod(minutes, 60)
     if hours > 0:
-        return f"ETA {hours}:{minutes:02d}:{sec:02d}"
-    return f"ETA {minutes}:{sec:02d}"
+        return f"{label} {hours}:{minutes:02d}:{sec:02d}"
+    return f"{label} {minutes}:{sec:02d}"
+
+
+def _localized_download_label(label: str) -> str:
+    if not is_arabic():
+        return label
+    return {
+        "video": "الفيديو",
+        "audio": "الصوت",
+        "file": "الملف",
+    }.get(label.strip().lower(), label)
 
 
 def build_queue_status(label: str, ticket: QueueTicket) -> str:
+    label = _localized_download_label(label)
+    if is_arabic():
+        return (
+            f"جار وضع {label} في قائمة الانتظار...\n"
+            f"الموقع: {ticket.position}\n"
+            f"العمّال: {ticket.active_workers}"
+        )
     return (
         f"Queueing {label}...\n"
         f"Position: {ticket.position}\n"
@@ -504,6 +524,7 @@ def _build_progress_bar(percent: float, width: int = 10) -> str:
 
 
 def build_progress_status(label: str, progress: DownloadProgress) -> str:
+    label = _localized_download_label(label)
     speed = _format_bytes(int(progress.speed_bps)) + "/s"
     downloaded = _format_bytes(progress.downloaded_bytes)
     if progress.total_bytes > 0:
@@ -522,6 +543,11 @@ def build_progress_status(label: str, progress: DownloadProgress) -> str:
 
 def build_rate_limit_text(retry_after: float) -> str:
     wait = max(1, int(round(retry_after)))
+    if is_arabic():
+        return (
+            "أرسلت طلبات كثيرة خلال وقت قصير.\n"
+            f"انتظر {wait} ثانية ثم حاول مجددًا."
+        )
     return (
         "Too many requests from your account right now.\n"
         f"Please wait {wait}s and try again."
@@ -529,6 +555,11 @@ def build_rate_limit_text(retry_after: float) -> str:
 
 
 def build_queue_busy_text(position: int) -> str:
+    if is_arabic():
+        return (
+            "قائمة انتظار التنزيل مشغولة الآن.\n"
+            f"سيكون موقع طلبك التالي تقريبًا #{position}."
+        )
     return (
         "The download queue is busy right now.\n"
         f"Your next request position would be around #{position}."

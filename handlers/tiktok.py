@@ -651,7 +651,7 @@ async def download_tiktok_doc_callback(call: types.CallbackQuery):
 @router.callback_query(F.data.startswith("audio:tiktok:"))
 async def download_tiktok_audio_callback(call: types.CallbackQuery):
     if not call.message:
-        await call.answer("Open the bot to download MP3", show_alert=True)
+        await call.answer(bm.open_bot_for_audio(), show_alert=True)
         return
 
     await call.answer()
@@ -860,22 +860,23 @@ async def handle_stats_callback(call: types.CallbackQuery):
     try:
         prefix, value = call.data.split("_", 1)
         mapping = {
-            "followers": ("Followers", "👥"),
-            "videos": ("Videos", "🎥"),
-            "likes": ("Likes", "❤️"),
-            "views": ("Views", "👁️"),
-            "comments": ("Comments", "💬"),
-            "shares": ("Shares", "🔄"),
+            "followers": "👥",
+            "videos": "🎥",
+            "likes": "❤️",
+            "views": "👁️",
+            "comments": "💬",
+            "shares": "🔄",
         }
         if prefix in mapping:
-            label, emoji = mapping[prefix]
+            label = bm.stat_value_label(prefix)
+            emoji = mapping[prefix]
             await call.answer(f"{label}: {value} {emoji}")
         else:
-            await call.answer("Unknown data")
+            await call.answer(bm.unknown_data())
     except Exception as e:
         logging.exception(
             "Error handling TikTok stats callback: data=%s error=%s",
             call.data,
             e,
         )
-        await call.answer("Error processing callback")
+        await call.answer(bm.callback_processing_error())
