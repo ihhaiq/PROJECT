@@ -406,27 +406,24 @@ async def _edit_guest_result(message: types.Message, sent: types.SentGuestMessag
     if not sent.inline_message_id:
         raise RuntimeError("Guest response did not return inline_message_id")
 
-    # Bot API 10.0 allows editMessageMedia to replace a text/rich message with media.
-    # Inline edits cannot upload a new file, so entries MUST already contain file_id.
-    if len(entries) != 1:
-        raise RuntimeError("Guest loading edit currently supports one media item")
+    # Inline edits can't upload files, so every local item is first uploaded
+    # to the cache channel. Bot API 10.1 can then replace the loading result
+    # with a rich Details/Slideshow message backed by Telegram file_ids.
+    from handlers.guest_rich_video import build_media_rich_message
 
-    entry = entries[0]
-    file_id = entry.get("file_id")
-    if not file_id:
-        raise RuntimeError("Guest final media requires file_id")
+    if not entries or not all(entry.get("file_id") for entry in entries):
+        raise RuntimeError("Guest final rich media requires file_id for every item")
 
-    kind = str(entry.get("kind", "")).lower()
-    if kind == "video":
-        media = types.InputMediaVideo(media=str(file_id), caption=description[:1024] if description else None)
-    elif kind == "photo":
-        media = types.InputMediaPhoto(media=str(file_id), caption=description[:1024] if description else None)
-    else:
-        raise RuntimeError(f"Unsupported Guest media kind: {kind}")
+    rich_message = build_media_rich_message(
+        entries=entries,
+        caption_text=description or None,
+    )
+    if rich_message is None:
+        raise RuntimeError("Guest final rich media has no supported blocks")
 
-    await message.bot.edit_message_media(
+    await message.bot.edit_message_text(
         inline_message_id=sent.inline_message_id,
-        media=media,
+        rich_message=rich_message,
     )
 
 
@@ -503,26 +500,12 @@ async def handle_guest_link_message(message: types.Message) -> None:
                 )
             return
 
-        if not entries:
-            logging.warning(
-                "Guest media resolve failed: service=%s url=%s guest_query_id=%s",
-                service,
-                summarize_url_for_log(url),
-                guest_query_id,
-            )
-            if loading_message.inline_message_id:
-                await message.bot.edit_message_text(
-                    inline_message_id=loading_message.inline_message_id,
-                    text="⚠️ تعذر تحميل المحتوى حالياً. حاول مرة أخرى.",
-                )
-            return
-
         if not all(entry.get("file_id") for entry in entries):
             entries = await _upload_guest_entries(message, entries)
             _remember_guest_entries(service, url, entries)
 
-        # The loading Guest message is edited into the already-uploaded media.
-        # No URL is ever used in the final Guest message.
+        # The loading Guest message becomes rich content backed exclusively by
+        # already-uploaded Telegram file_ids. No URL is used in the final edit.
         await _edit_guest_result(message, loading_message, entries, description)
 
         logging.info(

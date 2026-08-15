@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from aiogram import types
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import FSInputFile
+from aiogram.types import FSInputFile, ReplyParameters
 from aiogram.utils.media_group import MediaGroupBuilder
 
 from handlers.guest_rich_video import build_media_rich_message
@@ -274,11 +274,11 @@ def make_video_or_document_senders(
                     parse_mode=parse_mode,
                     disable_content_type_detection=True,
                 )
-            return await message.reply_video(
-                video=file_id,
+            return await send_cached_video_details(
+                message,
+                file_id=file_id,
                 caption=caption,
                 reply_markup=reply_markup_fn(),
-                parse_mode=parse_mode,
             )
         except TelegramBadRequest:
             return None
@@ -338,6 +338,48 @@ def resolve_media_input(
     raise ValueError("Media entry is missing file_id, path, and url")
 
 
+async def send_cached_video_details(
+    message: types.Message,
+    *,
+    file_id: str,
+    caption: str | None = None,
+    reply_markup: Any = None,
+) -> types.Message:
+    """Send an already-uploaded video inside an expandable Details block."""
+    rich_message = build_media_rich_message(
+        entries=[{"kind": "video", "file_id": file_id}],
+        caption_text=caption,
+    )
+    if rich_message is None:
+        raise ValueError("Could not build cached video Details block")
+
+    try:
+        send_kwargs: dict[str, Any] = {
+            "chat_id": message.chat.id,
+            "rich_message": rich_message,
+            "reply_markup": reply_markup,
+            "reply_parameters": ReplyParameters(message_id=message.message_id),
+        }
+        business_connection_id = getattr(message, "business_connection_id", None)
+        if business_connection_id:
+            send_kwargs["business_connection_id"] = business_connection_id
+        return await message.bot.send_rich_message(**send_kwargs)
+    except (TelegramBadRequest, AttributeError, TypeError, ValueError) as exc:
+        logging.warning(
+            "Cached video Details delivery failed; falling back to video: "
+            "chat_id=%s message_id=%s error=%s",
+            getattr(getattr(message, "chat", None), "id", None),
+            getattr(message, "message_id", None),
+            exc,
+        )
+        return await message.reply_video(
+            video=file_id,
+            caption=caption,
+            reply_markup=reply_markup,
+            parse_mode="HTML",
+        )
+
+
 async def _send_rich_media_for_message(
     message: types.Message,
     *,
@@ -375,6 +417,12 @@ async def _send_rich_media_for_message(
         for entry in entries
     ]
 
+    # A fresh upload must first use the legacy path so Telegram returns a
+    # reusable file_id and the database can cache it. Subsequent requests can
+    # safely render the cached media as Details/Slideshow rich blocks.
+    if not all(entry.get("file_id") for entry in normalized_entries):
+        return None
+
     rich_message = build_media_rich_message(
         entries=normalized_entries,
         caption_text=caption,
@@ -397,16 +445,21 @@ async def _send_rich_media_for_message(
         return None
 
     try:
-        return await message.bot.send_rich_message(
-            chat_id=message.chat.id,
-            rich_message=rich_message,
-            reply_markup=reply_markup,
-        )
-    except (TelegramBadRequest, ValueError, TypeError) as exc:
+        send_kwargs: dict[str, Any] = {
+            "chat_id": message.chat.id,
+            "rich_message": rich_message,
+            "reply_markup": reply_markup,
+            "reply_parameters": ReplyParameters(message_id=message.message_id),
+        }
+        business_connection_id = getattr(message, "business_connection_id", None)
+        if business_connection_id:
+            send_kwargs["business_connection_id"] = business_connection_id
+        return await message.bot.send_rich_message(**send_kwargs)
+    except (TelegramBadRequest, AttributeError, ValueError, TypeError) as exc:
         logging.warning(
             "Rich media delivery failed; falling back to normal media: "
             "chat_id=%s message_id=%s error=%s",
-            getattr(message.chat, "id", None),
+            getattr(getattr(message, "chat", None), "id", None),
             getattr(message, "message_id", None),
             exc,
         )
