@@ -3,6 +3,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
 from urllib.parse import quote
+from services.i18n import is_arabic
 
 
 def start_keyboard(
@@ -13,33 +14,37 @@ def start_keyboard(
     username = bot_username or "MaxLoadBot"
     base_link = f"https://t.me/{username}"
 
-    share_text = "Fast downloader bot for Instagram, TikTok, YouTube & more!"
+    arabic = is_arabic(language)
+    share_text = (
+        "بوت تنزيل سريع من Instagram وTikTok وYouTube والمزيد!"
+        if arabic
+        else "Fast downloader bot for Instagram, TikTok, YouTube & more!"
+    )
     share_url = f"https://t.me/share/url?url={quote(base_link)}&text={quote(share_text)}"
     add_to_group_url = f"https://t.me/{username}?startgroup=true"
-    is_arabic = (language or "").lower().startswith("ar")
-    lang_label = "🌐 English" if is_arabic else "🌐 العربية"
-    lang_callback = "set_lang:en" if is_arabic else "set_lang:ar"
+    lang_label = "🌐 English" if arabic else "🌐 العربية"
+    lang_callback = "set_lang:en" if arabic else "set_lang:ar"
 
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="⚡ Try inline" if not is_arabic else "⚡ استخدام داخلي", switch_inline_query_current_chat=""),
-                InlineKeyboardButton(text="⚙️ Settings" if not is_arabic else "⚙️ الإعدادات", callback_data="back_to_settings"),
+                InlineKeyboardButton(text="⚡ الوضع الداخلي" if arabic else "⚡ Try inline", switch_inline_query_current_chat=""),
+                InlineKeyboardButton(text="⚙️ الإعدادات" if arabic else "⚙️ Settings", callback_data="back_to_settings"),
             ],
             [
                 InlineKeyboardButton(text=lang_label, callback_data=lang_callback),
             ],
             [
-                InlineKeyboardButton(text="🚀 Share bot" if not is_arabic else "🚀 مشاركة البوت", url=share_url),
-                InlineKeyboardButton(text="➕ Add to group" if not is_arabic else "➕ إضافة للمجموعة", url=add_to_group_url),
+                InlineKeyboardButton(text="🚀 مشاركة البوت" if arabic else "🚀 Share bot", url=share_url),
+                InlineKeyboardButton(text="➕ إضافة للمجموعة" if arabic else "➕ Add to group", url=add_to_group_url),
             ],
         ]
     )
 
 
-def cancel_keyboard() -> InlineKeyboardMarkup:
+def cancel_keyboard(language: str | None = None) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="❌ Cancel", callback_data="cancel_action")
+    builder.button(text="❌ إلغاء" if is_arabic(language) else "❌ Cancel", callback_data="cancel_action")
     return builder.as_markup()
 
 
@@ -68,21 +73,40 @@ FIELD_CATEGORY_MAP = {
 }
 
 
-def return_settings_categories_keyboard() -> InlineKeyboardMarkup:
+def return_settings_categories_keyboard(language: str | None = None) -> InlineKeyboardMarkup:
+    if is_arabic(language):
+        labels = ("🎬 الوسائط والجودة", "🎨 الشكل والأزرار", "💬 الدردشة والتنظيف")
+    else:
+        labels = ("🎬 Media & Quality", "🎨 Appearance & Buttons", "💬 Chat & Clean-up")
     buttons = [
-        [InlineKeyboardButton(text="🎬 Media & Quality", callback_data="settings_cat:media")],
-        [InlineKeyboardButton(text="🎨 Appearance & Buttons", callback_data="settings_cat:appearance")],
-        [InlineKeyboardButton(text="💬 Chat & Clean-up", callback_data="settings_cat:chat")],
+        [InlineKeyboardButton(text=labels[0], callback_data="settings_cat:media")],
+        [InlineKeyboardButton(text=labels[1], callback_data="settings_cat:appearance")],
+        [InlineKeyboardButton(text=labels[2], callback_data="settings_cat:chat")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def return_category_settings_keyboard(category: str) -> InlineKeyboardMarkup:
-    if category == "media":
+def return_category_settings_keyboard(category: str, language: str | None = None) -> InlineKeyboardMarkup:
+    arabic = is_arabic(language)
+    if category == "media" and arabic:
+        fields = [
+            ("🎬 جودة الفيديو", "video_quality"),
+            ("📄 الإرسال كملف", "as_document"),
+            ("🎵 تنسيق الصوت", "audio_format"),
+        ]
+    elif category == "media":
         fields = [
             ("🎬 Video Quality", "video_quality"),
             ("📄 Send as File", "as_document"),
             ("🎵 Audio Format", "audio_format"),
+        ]
+    elif category == "appearance" and arabic:
+        fields = [
+            ("📝 الأوصاف", "captions"),
+            ("ℹ️ أزرار المعلومات", "info_buttons"),
+            ("🎧 زر MP3", "audio_button"),
+            ("📄 زر الملف", "file_button"),
+            ("🔗 زر الرابط", "url_button"),
         ]
     elif category == "appearance":
         fields = [
@@ -92,6 +116,8 @@ def return_category_settings_keyboard(category: str) -> InlineKeyboardMarkup:
             ("📄 File Button", "file_button"),
             ("🔗 URL Button", "url_button"),
         ]
+    elif arabic:
+        fields = [("🗑️ حذف الرسائل", "delete_message")]
     else:
         fields = [
             ("🗑️ Delete Messages", "delete_message"),
@@ -101,72 +127,87 @@ def return_category_settings_keyboard(category: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=text, callback_data=f"settings:{field}")]
         for text, field in fields
     ]
-    buttons.append([InlineKeyboardButton(text="⬅️ Back to Categories", callback_data="back_to_settings")])
+    back_label = "⬅️ العودة إلى الأقسام" if arabic else "⬅️ Back to Categories"
+    buttons.append([InlineKeyboardButton(text=back_label, callback_data="back_to_settings")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def return_field_keyboard(field: str, value: str | None):
+def return_field_keyboard(field: str, value: str | None, language: str | None = None):
     val = (value or "").strip().lower()
+    arabic = is_arabic(language)
     cat = FIELD_CATEGORY_MAP.get(field, "media")
     back_cb = f"settings_cat:{cat}"
 
     if field == "video_quality":
         current = val or "best"
-        opt_best = "✅ 🏆 Best (1080p+)" if current == "best" else "🏆 Best (1080p+)"
-        opt_bal = "✅ ⚖️ Balanced (720p)" if current == "balanced" else "⚖️ Balanced (720p)"
-        opt_saver = "✅ ⚡ Data Saver (480p)" if current == "saver" else "⚡ Data Saver (480p)"
+        best = "الأفضل (1080p+)" if arabic else "Best (1080p+)"
+        balanced = "متوازن (720p)" if arabic else "Balanced (720p)"
+        saver = "توفير البيانات (480p)" if arabic else "Data Saver (480p)"
+        opt_best = f"{'✅ ' if current == 'best' else ''}🏆 {best}"
+        opt_bal = f"{'✅ ' if current == 'balanced' else ''}⚖️ {balanced}"
+        opt_saver = f"{'✅ ' if current == 'saver' else ''}⚡ {saver}"
 
         buttons = [
             [InlineKeyboardButton(text=opt_best, callback_data="setting:video_quality:best")],
             [InlineKeyboardButton(text=opt_bal, callback_data="setting:video_quality:balanced")],
             [InlineKeyboardButton(text=opt_saver, callback_data="setting:video_quality:saver")],
-            [InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)],
+            [InlineKeyboardButton(text="⬅️ رجوع" if arabic else "⬅️ Back", callback_data=back_cb)],
         ]
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 
     if field == "audio_format":
         current = val or "mp3"
-        opt_mp3 = "✅ 🎧 MP3 Audio" if current == "mp3" else "🎧 MP3 Audio"
+        mp3 = "صوت MP3" if arabic else "MP3 Audio"
+        original = "FLAC / الأصلي" if arabic else "FLAC / Original"
+        opt_mp3 = f"{'✅ ' if current == 'mp3' else ''}🎧 {mp3}"
         opt_m4a = "✅ 📱 M4A (AAC)" if current == "m4a" else "📱 M4A (AAC)"
-        opt_best = "✅ 🎼 FLAC / Original" if current == "best" else "🎼 FLAC / Original"
+        opt_best = f"{'✅ ' if current == 'best' else ''}🎼 {original}"
 
         buttons = [
             [InlineKeyboardButton(text=opt_mp3, callback_data="setting:audio_format:mp3")],
             [InlineKeyboardButton(text=opt_m4a, callback_data="setting:audio_format:m4a")],
             [InlineKeyboardButton(text=opt_best, callback_data="setting:audio_format:best")],
-            [InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)],
+            [InlineKeyboardButton(text="⬅️ رجوع" if arabic else "⬅️ Back", callback_data=back_cb)],
         ]
         return InlineKeyboardMarkup(inline_keyboard=buttons)
 
     is_enabled = val == "on"
-    status_text = "🟢 Currently ON" if is_enabled else "🔴 Currently OFF"
+    if arabic:
+        status_text = "🟢 مفعّل حاليًا" if is_enabled else "🔴 معطّل حاليًا"
+        action_text = "🔴 إيقاف" if is_enabled else "🟢 تفعيل"
+    else:
+        status_text = "🟢 Currently ON" if is_enabled else "🔴 Currently OFF"
+        action_text = "🔴 Turn OFF" if is_enabled else "🟢 Turn ON"
     next_value = "off" if is_enabled else "on"
-    action_text = "🔴 Turn OFF" if is_enabled else "🟢 Turn ON"
 
     buttons = [
         [InlineKeyboardButton(text=status_text, callback_data="noop")],
         [InlineKeyboardButton(text=action_text, callback_data=f"setting:{field}:{next_value}")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)],
+        [InlineKeyboardButton(text="⬅️ رجوع" if arabic else "⬅️ Back", callback_data=back_cb)],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def return_settings_keyboard():
-    return return_settings_categories_keyboard()
+def return_settings_keyboard(language: str | None = None):
+    return return_settings_categories_keyboard(language=language)
 
 
-def stats_keyboard(current_period: str = "Week", mode: str = "total"):
+def stats_keyboard(current_period: str = "Week", mode: str = "total", language: str | None = None):
     periods = ["Week", "Month", "Year"]
+    labels = {"Week": "أسبوع", "Month": "شهر", "Year": "سنة"} if is_arabic(language) else {}
     period_buttons = [
         InlineKeyboardButton(
-            text=f"[{period}]" if period == current_period else period,
+            text=f"[{labels.get(period, period)}]" if period == current_period else labels.get(period, period),
             callback_data=f"stats:{period}:{mode}",
         )
         for period in periods
     ]
 
     toggle_target = "split" if mode == "total" else "total"
-    toggle_label = "View: By platform" if mode == "total" else "View: Overall"
+    if is_arabic(language):
+        toggle_label = "العرض: حسب المنصة" if mode == "total" else "العرض: الإجمالي"
+    else:
+        toggle_label = "View: By platform" if mode == "total" else "View: Overall"
 
     buttons = [
         period_buttons,
@@ -218,23 +259,24 @@ def return_back_to_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=back_button)
 
 
-def start_private_chat_keyboard(bot_username: str):
+def start_private_chat_keyboard(bot_username: str, language: str | None = None):
     url = f"https://t.me/{bot_username}?start=from_group"
-    button = [[InlineKeyboardButton(text="💬 Open bot chat", url=url)]]
+    text = "💬 فتح دردشة البوت" if is_arabic(language) else "💬 Open bot chat"
+    button = [[InlineKeyboardButton(text=text, url=url)]]
     return InlineKeyboardMarkup(inline_keyboard=button)
 
 
-def return_audio_download_keyboard(platform, url):
+def return_audio_download_keyboard(platform, url, language: str | None = None):
     audio_button = [
-        [InlineKeyboardButton(text="🎧 Download MP3", callback_data=f"{platform}_audio_{url}")]
+        [InlineKeyboardButton(text="🎧 تنزيل MP3" if is_arabic(language) else "🎧 Download MP3", callback_data=f"{platform}_audio_{url}")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=audio_button)
 
 
-def inline_send_video_keyboard(token: str) -> InlineKeyboardMarkup:
+def inline_send_video_keyboard(token: str, language: str | None = None) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Send video inline", callback_data=f"inline:tiktok:{token}")]
+            [InlineKeyboardButton(text="إرسال الفيديو داخليًا" if is_arabic(language) else "Send video inline", callback_data=f"inline:tiktok:{token}")]
         ]
     )
 
@@ -291,6 +333,7 @@ def return_video_info_keyboard(
     user_settings,
     audio_callback_data: str | None = None,
     file_callback_data: str | None = None,
+    language: str | None = None,
 ):
     builder = InlineKeyboardBuilder()
 
@@ -333,17 +376,17 @@ def return_video_info_keyboard(
             builder.row(*row1)
 
     if user_settings.get("audio_button") == "on" and audio_callback_data:
-        builder.row(InlineKeyboardButton(text="🎧 Download MP3", callback_data=audio_callback_data))
+        builder.row(InlineKeyboardButton(text="🎧 تنزيل MP3" if is_arabic(language) else "🎧 Download MP3", callback_data=audio_callback_data))
 
     if (
         user_settings.get("file_button") == "on"
         and user_settings.get("as_document") != "on"
         and file_callback_data
     ):
-        builder.row(InlineKeyboardButton(text="📄 Download File", callback_data=file_callback_data))
+        builder.row(InlineKeyboardButton(text="📄 تنزيل الملف" if is_arabic(language) else "📄 Download File", callback_data=file_callback_data))
 
     if user_settings["url_button"] == "on" and video_url:
-        builder.row(InlineKeyboardButton(text="🔗 URL", url=video_url))
+        builder.row(InlineKeyboardButton(text="🔗 الرابط" if is_arabic(language) else "🔗 URL", url=video_url))
 
     return builder.as_markup()
 
