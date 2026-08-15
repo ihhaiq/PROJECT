@@ -41,7 +41,7 @@ from handlers.utils import (
     with_message_logging,
 )
 from services.logger import logger as logging, summarize_text_for_log, summarize_url_for_log
-from services.media.delivery import send_cached_media_entries
+from services.media.delivery import send_cached_media_entries, send_cached_video_details
 from services.media.orchestration import (
     make_message_backpressure_handler,
     run_media_group_flow,
@@ -207,11 +207,11 @@ async def process_threads_single_media(
     async def _send_cached(file_id: str):
         try:
             if media_kind == "video":
-                return await message.reply_video(
-                    video=file_id,
+                return await send_cached_video_details(
+                    message,
+                    file_id=file_id,
                     caption=bm.captions(user_settings["captions"], post.description, bot_url),
                     reply_markup=_threads_reply_markup(source_url, user_settings),
-                    parse_mode="HTML",
                 )
             return await message.reply_photo(
                 photo=file_id,

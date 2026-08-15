@@ -13,7 +13,7 @@ from config import CHANNEL_ID, COBALT_API_KEY, COBALT_API_URL, OUTPUT_DIR, MAX_F
 from handlers.deps import build_handler_dependencies
 from handlers.pinterest_inline import handle_pinterest_inline_query, send_inline_pinterest_media
 from handlers.request_dedupe import claim_message_request
-from services.media.delivery import send_cached_media_entries
+from services.media.delivery import send_cached_media_entries, send_cached_video_details
 from services.media.video_metadata import build_video_send_kwargs
 from services.media.orchestration import (
     make_message_backpressure_handler,
@@ -215,11 +215,11 @@ async def process_pinterest_single_media(
     async def _send_cached(file_id: str):
         try:
             if media_kind == "video":
-                return await message.reply_video(
-                    video=file_id,
+                return await send_cached_video_details(
+                    message,
+                    file_id=file_id,
                     caption=bm.captions(user_settings["captions"], post.description, bot_url),
                     reply_markup=_reply_markup(),
-                    parse_mode="HTML",
                 )
             return await message.reply_photo(
                 photo=file_id,

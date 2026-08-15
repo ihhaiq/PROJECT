@@ -167,7 +167,7 @@ async def test_send_cached_media_entries_sends_private_rich_video_details():
 
     sent = await send_cached_media_entries(
         message,
-        [{"kind": "video", "cache_key": "post#vid", "file_id": None, "path": "/tmp/video.mp4", "cached": False}],
+        [{"kind": "video", "cache_key": "post#vid", "file_id": "cached-video-id", "path": None, "cached": True}],
         db_service=SimpleNamespace(add_file=AsyncMock()),
         caption="caption",
     )
@@ -192,8 +192,8 @@ async def test_send_cached_media_entries_sends_private_rich_slideshow_for_multi_
     sent = await send_cached_media_entries(
         message,
         [
-            {"kind": "photo", "cache_key": "post#0", "file_id": None, "path": "/tmp/1.jpg", "cached": False},
-            {"kind": "photo", "cache_key": "post#1", "file_id": None, "path": "/tmp/2.jpg", "cached": False},
+            {"kind": "photo", "cache_key": "post#0", "file_id": "cached-photo-1", "path": None, "cached": True},
+            {"kind": "photo", "cache_key": "post#1", "file_id": "cached-photo-2", "path": None, "cached": True},
         ],
         db_service=SimpleNamespace(add_file=AsyncMock()),
         caption="album",
@@ -416,6 +416,13 @@ async def test_send_cached_media_entries_probes_all_batch_videos_and_caches_grou
 
 def _make_sender_message():
     return SimpleNamespace(
+        message_id=42,
+        chat=SimpleNamespace(id=123),
+        bot=SimpleNamespace(
+            send_rich_message=AsyncMock(
+                return_value=SimpleNamespace(message_id=777, rich_message=object())
+            )
+        ),
         reply_video=AsyncMock(
             return_value=SimpleNamespace(
                 document=None, video=SimpleNamespace(file_id="video-file-id")
@@ -446,19 +453,23 @@ async def test_make_video_or_document_senders_sends_cached_video():
 
     sent = await send_cached("cached-file-id")
 
-    message.reply_video.assert_awaited_once_with(
-        video="cached-file-id",
-        caption="caption",
-        reply_markup=reply_markup,
-        parse_mode="HTML",
-    )
+    assert sent.message_id == 777
+    message.bot.send_rich_message.assert_awaited_once()
+    rich_message = message.bot.send_rich_message.await_args.kwargs["rich_message"]
+    assert rich_message.blocks[0].blocks[0].video.media == "cached-file-id"
+    assert message.bot.send_rich_message.await_args.kwargs["reply_markup"] is reply_markup
+    message.reply_video.assert_not_awaited()
     message.reply_document.assert_not_awaited()
-    assert extract_file_id(sent) == "video-file-id"
+    assert extract_file_id(sent) is None
 
 
 @pytest.mark.asyncio
 async def test_make_video_or_document_senders_cached_bad_request_returns_none():
     message = _make_sender_message()
+    message.bot.send_rich_message.side_effect = TelegramBadRequest(
+        method=SimpleNamespace(__api_method__="sendRichMessage"),
+        message="Telegram server says - Bad Request: wrong file identifier",
+    )
     message.reply_video.side_effect = TelegramBadRequest(
         method=SimpleNamespace(__api_method__="sendVideo"),
         message="Telegram server says - Bad Request: wrong file identifier",
