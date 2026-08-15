@@ -21,6 +21,7 @@ import keyboards as kb
 import messages as bm
 from app_context import db
 from services.logger import logger as logging
+from services.i18n import is_arabic
 from services.storage.db import StatsSnapshot
 from services.stats.constants import SERVICE_ORDER, SERVICE_COLORS, SERVICE_EMOJI, VALID_STATS_PERIODS, VALID_STATS_MODES
 
@@ -341,6 +342,39 @@ def render_stats_chart(snapshot: StatsSnapshot, period: str, mode: str) -> bytes
 
 
 def build_stats_caption(period: str, snapshot: StatsSnapshot, mode: str = "total") -> str:
+    if is_arabic():
+        period_label = {"Week": "الأسبوع", "Month": "الشهر", "Year": "السنة"}.get(period, period)
+        header = f"<b>إحصائيات {period_label}</b>"
+        if snapshot.total_downloads <= 0:
+            return f"{header}\n\nلا توجد تنزيلات مسجلة لهذه الفترة بعد."
+
+        dates, counts = _build_series_for_period(snapshot.totals_by_date, period)
+        peak_index = max(range(len(counts)), key=counts.__getitem__)
+        peak_bucket = _format_stats_bucket(period, dates[peak_index])
+        peak_count = counts[peak_index]
+        bucket_label = "الشهر" if period == "Year" else "اليوم"
+        average = snapshot.total_downloads / len(counts) if counts else 0.0
+        lines = [
+            header,
+            "",
+            f"إجمالي التنزيلات: <b>{snapshot.total_downloads}</b>",
+            f"أعلى {bucket_label}: <b>{peak_bucket}</b> - <b>{peak_count}</b>",
+            f"المعدل لكل {bucket_label}: <b>{average:.1f}</b>",
+        ]
+        if mode == "split" and snapshot.service_totals:
+            top_services = sorted(
+                snapshot.service_totals.items(),
+                key=lambda item: (-item[1], SERVICE_ORDER.index(item[0]) if item[0] in SERVICE_ORDER else len(SERVICE_ORDER)),
+            )[:3]
+            if top_services:
+                lines.extend(["", "<b>أكثر المنصات استخدامًا</b>"])
+                for service, count in top_services:
+                    share = (count / snapshot.total_downloads) * 100 if snapshot.total_downloads else 0.0
+                    emoji = SERVICE_EMOJI.get(service, "")
+                    prefix = f"{emoji} " if emoji else ""
+                    lines.append(f"{prefix}{service}: <b>{count}</b> ({share:.0f}%)")
+        return "\n".join(lines)
+
     header = f"<b>Statistics for {period}</b>"
     if snapshot.total_downloads <= 0:
         return f"{header}\n\nNo downloads recorded for this period yet."

@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from services.logger import logger as logging
+from services.i18n import normalize_language
 from services.settings import SETTING_DISABLED, SETTING_FIELDS, SETTING_VALUES, normalize_setting_value
 from services.storage.models import DEFAULT_USER_SETTINGS, Settings, User
 
@@ -19,11 +20,12 @@ class UserRepositoryMixin:
         return sqlite_insert(model)
 
     async def upsert_chat(self, user_id: int, user_name: str | None, user_username: str | None, chat_type: str | None, language: str | None = None, status: str = "active", referred_by: int | None = None, source: str | None = None) -> None:
+        normalized_language = normalize_language(language)
         values = {
             "user_name": user_name,
             "user_username": user_username,
             "chat_type": chat_type,
-            "language": language,
+            "language": normalized_language,
             "status": status,
         }
         if referred_by is not None:
@@ -32,10 +34,11 @@ class UserRepositoryMixin:
             values["source"] = source
         async with self.SessionLocal() as session:
             async with session.begin():
+                update_values = {key: value for key, value in values.items() if key != "language"}
                 stmt = (
                     self._insert(User)
                     .values(user_id=user_id, **values)
-                    .on_conflict_do_update(index_elements=[User.user_id], set_=values)
+                    .on_conflict_do_update(index_elements=[User.user_id], set_=update_values)
                 )
                 await session.execute(stmt)
         self._status_cache[int(user_id)] = (time.monotonic(), status)
@@ -48,6 +51,41 @@ class UserRepositoryMixin:
         user_id_int = int(user_id)
         self._status_cache.pop(user_id_int, None)
         self._settings_cache.pop(user_id_int, None)
+        self._language_cache.pop(user_id_int, None)
+
+    async def get_user_language(self, user_id: int, fallback: str | None = None) -> str:
+        user_id_int = int(user_id)
+        now = time.monotonic()
+        self._prune_local_caches(now)
+        cached = self._language_cache.get(user_id_int)
+        if cached and now - cached[0] <= self._language_ttl_seconds:
+            return cached[1]
+
+        async with self.SessionLocal() as session:
+            result = await session.execute(
+                select(User.language).where(User.user_id == user_id_int)
+            )
+            stored_language = result.scalar()
+
+        language = normalize_language(stored_language or fallback)
+        self._language_cache[user_id_int] = (now, language)
+        return language
+
+    async def set_user_language(self, user_id: int, language: str) -> str:
+        user_id_int = int(user_id)
+        normalized_language = normalize_language(language)
+        async with self.SessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    update(User)
+                    .where(User.user_id == user_id_int)
+                    .values(language=normalized_language)
+                )
+        self._language_cache[user_id_int] = (
+            time.monotonic(),
+            normalized_language,
+        )
+        return normalized_language
 
     async def get_user_counts(self) -> dict[str, int]:
         async with self.SessionLocal() as session:

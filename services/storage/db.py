@@ -131,13 +131,16 @@ class DataBase(
         self._settings_cache: dict[int, tuple[float, dict[str, str]]] = {}
         self._file_cache: dict[str, tuple[float, str | None]] = {}
         self._status_cache: dict[int, tuple[float, str | None]] = {}
+        self._language_cache: dict[int, tuple[float, str]] = {}
         self._settings_ttl_seconds = 120.0
         self._file_cache_hit_ttl_seconds: float | None = 24 * 60 * 60.0
         self._file_cache_miss_ttl_seconds = 15.0
         self._status_ttl_seconds = 20.0
+        self._language_ttl_seconds = 300.0
         self._settings_cache_max_entries = 4096
         self._file_cache_max_entries = 8192
         self._status_cache_max_entries = 4096
+        self._language_cache_max_entries = 4096
         self._file_cache_hits = 0
         self._file_cache_misses = 0
         self._cache_cleanup_interval_seconds = 60.0

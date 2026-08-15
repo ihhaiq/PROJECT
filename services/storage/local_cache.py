@@ -46,6 +46,12 @@ class LocalCacheMixin:
             ttl_getter=lambda _value: self._status_ttl_seconds,
         )
         self._prune_cache(
+            self._language_cache,
+            now=now,
+            max_entries=self._language_cache_max_entries,
+            ttl_getter=lambda _value: self._language_ttl_seconds,
+        )
+        self._prune_cache(
             self._file_cache,
             now=now,
             max_entries=self._file_cache_max_entries,
