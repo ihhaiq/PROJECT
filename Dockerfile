@@ -17,8 +17,8 @@ ENV TZ=UTC \
 
 WORKDIR /app
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+RUN --mount=type=cache,id=apt-cache-builder,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-builder,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
       gcc \
       build-essential \
@@ -30,7 +30,7 @@ RUN python -m venv "$VIRTUAL_ENV"
 
 COPY requirements.txt ./
 
-RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv,sharing=locked \
     uv pip install --python "$VIRTUAL_ENV/bin/python" -r requirements.txt
 
 FROM python:3.14-slim
@@ -46,8 +46,8 @@ ENV TZ=UTC \
 
 WORKDIR /app
 
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+RUN --mount=type=cache,id=apt-cache-runtime,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=apt-lists-runtime,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
