@@ -23,6 +23,7 @@ from services.media.delivery import (
     make_video_or_document_senders,
     send_audio_with_thumbnail,
     send_cached_media_entries,
+    send_rich_media_entries,
 )
 from services.media.orchestration import run_single_media_flow
 from handlers.user import update_info
@@ -515,6 +516,121 @@ async def process_tiktok_photos(
                 zip(images, cache_keys, cached_file_ids)
             )
         ]
+
+        # In public chats/channels, mirror Guest Mode immediately: upload any
+        # uncached photo and the original soundtrack to Telegram's cache
+        # channel, then render one Rich Message containing a Photo/Slideshow
+        # block followed by an Audio block. Legacy albums remain the fallback
+        # when Rich Messages or the cache channel are unavailable.
+        chat_type = getattr(message.chat.type, "value", message.chat.type)
+        is_public_chat = chat_type in {"group", "supergroup", "channel"}
+        if is_public_chat and not as_document and CHANNEL_ID and info and info.music_play_url:
+            rich_entries: list[dict] = []
+            rich_ready = True
+            for item in media_items:
+                file_id = item.get("file_id")
+                if not file_id:
+                    try:
+                        cached_photo = await bot.send_photo(
+                            chat_id=CHANNEL_ID,
+                            photo=item["url"],
+                            disable_notification=True,
+                        )
+                        file_id = cached_photo.photo[-1].file_id if cached_photo.photo else None
+                        if file_id:
+                            await db.add_file(item["cache_key"], file_id, "photo")
+                            item["file_id"] = file_id
+                            item["cached"] = True
+                    except Exception as exc:
+                        logging.warning(
+                            "Failed to pre-cache TikTok photo for rich delivery: "
+                            "url=%s error=%s",
+                            summarize_url_for_log(item.get("url")),
+                            exc,
+                        )
+                if not file_id:
+                    rich_ready = False
+                    break
+                rich_entries.append({"kind": "photo", "file_id": file_id})
+
+            audio_path: Optional[str] = None
+            try:
+                audio_cache_key = build_audio_cache_key(video_url)
+                audio_file_id = await db.get_file_id(audio_cache_key)
+                if rich_ready and not audio_file_id:
+                    audio_name = (
+                        f"{info.id}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                        "_tiktok_rich_audio.mp3"
+                    )
+                    audio_metrics = await tiktok_service.download_audio(
+                        video_url,
+                        audio_name,
+                        download_data=data,
+                        user_id=message.from_user.id,
+                        chat_id=message.chat.id,
+                        request_id=f"tiktok_rich_audio:{info.id}",
+                    )
+                    if audio_metrics:
+                        audio_path = audio_metrics.path
+                    if audio_metrics and audio_metrics.size < MAX_FILE_SIZE:
+                        cached_audio = await bot.send_audio(
+                            chat_id=CHANNEL_ID,
+                            audio=FSInputFile(audio_path),
+                            title=info.description or "TikTok audio",
+                            duration=info.duration_seconds or None,
+                            disable_notification=True,
+                        )
+                        audio_file_id = cached_audio.audio.file_id if cached_audio.audio else None
+                        if audio_file_id:
+                            await db.add_file(audio_cache_key, audio_file_id, "audio")
+
+                if rich_ready and audio_file_id:
+                    rich_entries.append(
+                        {
+                            "kind": "audio",
+                            "file_id": audio_file_id,
+                            "title": info.description or "TikTok audio",
+                            "performer": f"@{info.author}" if info.author else None,
+                            "duration": info.duration_seconds or None,
+                        }
+                    )
+                    rich_result = await send_rich_media_entries(
+                        message,
+                        rich_entries,
+                        caption=bm.captions(
+                            user_settings["captions"] if isinstance(user_settings, dict) else "off",
+                            info.description,
+                            bot_url,
+                        ),
+                        reply_markup=kb.return_video_info_keyboard(
+                            info.views,
+                            info.likes,
+                            info.comments,
+                            info.shares,
+                            info.music_play_url,
+                            video_url,
+                            user_settings,
+                            audio_callback_data=None,
+                        ),
+                    )
+                    if rich_result is not None:
+                        await maybe_delete_user_message(
+                            message,
+                            user_settings["delete_message"]
+                            if isinstance(user_settings, dict)
+                            else "off",
+                        )
+                        return True
+            except Exception as exc:
+                logging.warning(
+                    "TikTok photo Rich Message failed; using legacy album: "
+                    "url=%s error=%s",
+                    summarize_url_for_log(video_url),
+                    exc,
+                )
+            finally:
+                if audio_path:
+                    await remove_file(audio_path)
 
         await send_cached_media_entries(
             message,
