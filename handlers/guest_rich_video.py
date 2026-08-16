@@ -24,8 +24,10 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardMarkup,
     InlineQueryResultArticle,
+    InputMediaAudio,
     InputMediaPhoto,
     InputMediaVideo,
+    InputRichBlockAudio,
     InputRichBlockDetails,
     InputRichBlockPhoto,
     InputRichBlockSlideshow,
@@ -112,9 +114,10 @@ def build_media_rich_message(
       - 2+ photos -> Slideshow
       - one photo -> Photo block
       - every video -> Details/Toggle block
+      - audio -> Audio block
 
     Mixed posts are supported too: photos are grouped into one slideshow and
-    videos are rendered as individual Details blocks.
+    videos/audio are rendered as individual blocks.
     """
     if not entries:
         return None
@@ -124,14 +127,23 @@ def build_media_rich_message(
         for entry in entries
         if str(entry.get("kind", "")).lower() == "photo"
     ]
-    video_sources = [
-        entry.get("path") or entry.get("file_id") or entry.get("url")
+    video_entries = [
+        entry
         for entry in entries
         if str(entry.get("kind", "")).lower() == "video"
     ]
+    audio_entries = [
+        entry
+        for entry in entries
+        if str(entry.get("kind", "")).lower() == "audio"
+    ]
 
     photo_sources = [str(source) for source in photo_sources if source]
-    video_sources = [str(source) for source in video_sources if source]
+    video_sources = [
+        str(source)
+        for entry in video_entries
+        if (source := entry.get("path") or entry.get("file_id") or entry.get("url"))
+    ]
 
     blocks = []
 
@@ -163,6 +175,29 @@ def build_media_rich_message(
             caption_text=caption_text if not photo_sources and index == 0 else None,
         )
         blocks.extend(details.blocks or [])
+
+    # Audio is a first-class Rich Message block. TikTok photo posts use this
+    # to keep the original soundtrack in the very same message as the photo
+    # slideshow instead of requiring a separate callback/download message.
+    for entry in audio_entries:
+        source = entry.get("path") or entry.get("file_id") or entry.get("url")
+        if not source:
+            continue
+        audio_kwargs: dict[str, Any] = {"media": _media_ref(source)}
+        for field in ("title", "performer", "duration"):
+            value = entry.get(field)
+            if value not in (None, ""):
+                audio_kwargs[field] = value
+        blocks.append(
+            InputRichBlockAudio(
+                audio=InputMediaAudio(**audio_kwargs),
+                caption=(
+                    RichBlockCaption(text=str(entry["caption"]))
+                    if entry.get("caption")
+                    else None
+                ),
+            )
+        )
 
     return InputRichMessage(blocks=blocks) if blocks else None
 
