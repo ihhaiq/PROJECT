@@ -382,6 +382,85 @@ async def test_process_tiktok_photos_replies_only_on_first_sent_message(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_public_tiktok_photos_send_slideshow_and_original_audio_as_one_rich_message(
+    monkeypatch,
+):
+    status_message = SimpleNamespace(delete=AsyncMock())
+    message = SimpleNamespace(
+        from_user=SimpleNamespace(id=42),
+        chat=SimpleNamespace(id=-10099, type="supergroup"),
+        message_id=7,
+        business_connection_id=None,
+        answer=AsyncMock(return_value=status_message),
+    )
+    info = tiktok.TikTokVideo(
+        id="123",
+        description="caption",
+        cover="https://cdn.example.com/cover.jpg",
+        author="creator",
+        views=1,
+        likes=2,
+        comments=3,
+        shares=4,
+        music_play_url="https://cdn.example.com/audio.mp3",
+        duration_seconds=12,
+    )
+    photo_results = [
+        SimpleNamespace(photo=[SimpleNamespace(file_id="photo-1")]),
+        SimpleNamespace(photo=[SimpleNamespace(file_id="photo-2")]),
+    ]
+    rich_result = SimpleNamespace(message_id=99)
+
+    monkeypatch.setattr(tiktok, "send_analytics", AsyncMock())
+    monkeypatch.setattr(tiktok, "video_info", AsyncMock(return_value=info))
+    monkeypatch.setattr(tiktok, "send_chat_action_if_needed", AsyncMock())
+    monkeypatch.setattr(tiktok, "safe_delete_message", AsyncMock())
+    monkeypatch.setattr(tiktok, "maybe_delete_user_message", AsyncMock())
+    monkeypatch.setattr(tiktok, "remove_file", AsyncMock())
+    monkeypatch.setattr(tiktok.db, "get_file_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(tiktok.db, "add_file", AsyncMock())
+    monkeypatch.setattr(tiktok.bot, "send_photo", AsyncMock(side_effect=photo_results))
+    monkeypatch.setattr(
+        tiktok.bot,
+        "send_audio",
+        AsyncMock(return_value=SimpleNamespace(audio=SimpleNamespace(file_id="audio-1"))),
+    )
+    monkeypatch.setattr(
+        tiktok.tiktok_service,
+        "download_audio",
+        AsyncMock(return_value=SimpleNamespace(path="/tmp/tiktok-audio.mp3", size=1024)),
+    )
+    send_rich = AsyncMock(return_value=rich_result)
+    monkeypatch.setattr(tiktok, "send_rich_media_entries", send_rich)
+
+    result = await tiktok.process_tiktok_photos(
+        message,
+        {"data": {"id": "123"}},
+        "https://t.me/maxloadbot",
+        {
+            "captions": "on",
+            "delete_message": "off",
+            "info_buttons": "off",
+            "url_button": "off",
+            "audio_button": "on",
+            "as_document": "off",
+        },
+        None,
+        ["https://cdn.example.com/1.jpg", "https://cdn.example.com/2.jpg"],
+    )
+
+    assert result is True
+    assert tiktok.bot.send_photo.await_count == 2
+    tiktok.bot.send_audio.assert_awaited_once()
+    send_rich.assert_awaited_once()
+    entries = send_rich.await_args.args[1]
+    assert [entry["kind"] for entry in entries] == ["photo", "photo", "audio"]
+    assert [entry["file_id"] for entry in entries] == ["photo-1", "photo-2", "audio-1"]
+    assert send_rich.await_args.kwargs["reply_markup"].inline_keyboard == []
+    tiktok.remove_file.assert_awaited_once_with("/tmp/tiktok-audio.mp3")
+
+
+@pytest.mark.asyncio
 async def test_download_tiktok_doc_callback_uses_pressing_user_settings(monkeypatch):
     settings = {
         "captions": "on",
