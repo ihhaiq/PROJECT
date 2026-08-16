@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from aiogram.types import (
+    InputRichBlockAudio,
     InputRichBlockDetails,
     InputRichBlockPhoto,
     InputRichBlockSlideshow,
@@ -62,6 +63,30 @@ def test_build_media_rich_message_splits_large_slideshow_without_data_loss():
     assert len(rich_message.blocks) == 2
     assert all(isinstance(block, InputRichBlockSlideshow) for block in rich_message.blocks)
     assert [len(block.blocks) for block in rich_message.blocks] == [10, 3]
+
+
+def test_build_media_rich_message_keeps_slideshow_and_audio_in_one_message():
+    rich_message = build_media_rich_message(
+        entries=[
+            {"kind": "photo", "file_id": "photo-1"},
+            {"kind": "photo", "file_id": "photo-2"},
+            {
+                "kind": "audio",
+                "file_id": "audio-1",
+                "title": "Original sound",
+                "performer": "@creator",
+                "duration": 15,
+            },
+        ],
+        caption_text="album",
+    )
+
+    assert rich_message is not None
+    assert isinstance(rich_message.blocks[0], InputRichBlockSlideshow)
+    assert isinstance(rich_message.blocks[1], InputRichBlockAudio)
+    assert rich_message.blocks[1].audio.media == "audio-1"
+    assert rich_message.blocks[1].audio.title == "Original sound"
+    assert rich_message.blocks[1].audio.performer == "@creator"
 
 
 @pytest.mark.asyncio
