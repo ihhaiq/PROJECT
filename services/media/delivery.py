@@ -406,6 +406,7 @@ async def _send_rich_media_for_message(
     if not entries:
         return None
 
+
     normalized_entries = [
         {
             **entry,
@@ -464,6 +465,27 @@ async def _send_rich_media_for_message(
             exc,
         )
         return None
+
+
+async def send_rich_media_entries(
+    message: types.Message,
+    entries: list[dict[str, Any]],
+    *,
+    caption: str | None = None,
+    reply_markup: Any = None,
+) -> types.Message | None:
+    """Send cached media as one Rich Message when every item has a file_id.
+
+    This public wrapper is used by platform-specific flows that need richer
+    combinations than Telegram's legacy albums support (for example a TikTok
+    photo slideshow followed by its original audio block).
+    """
+    return await _send_rich_media_for_message(
+        message,
+        entries=entries,
+        caption=caption,
+        reply_markup=reply_markup,
+    )
 
 
 async def _cache_sent_entry(
