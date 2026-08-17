@@ -100,10 +100,57 @@ async def _resolve_tiktok(url: str, *, user_id: int | None, chat_id: int | None)
     if not info:
         return [], ""
 
+    video_url = build_tiktok_video_url(info)
+    images = data.get("data", {}).get("images", [])
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+
+    # TikTok photo posts also expose a generated MP4. Do not use it in Guest
+    # Mode: keep the original image(s) and soundtrack as separate Rich Message
+    # blocks, matching delivery when the bot is an administrator.
+    if images:
+        entries: list[dict[str, Any]] = [
+            {
+                "kind": "photo",
+                "path": None,
+                "file_id": None,
+                "url": str(image_url),
+                "cached": False,
+            }
+            for image_url in images
+            if image_url
+        ]
+
+        if entries and info.music_play_url:
+            audio_name = f"{info.id}_{timestamp}_guest_tiktok_audio.mp3"
+            audio_metrics = await tiktok_service.download_audio(
+                video_url,
+                audio_name,
+                download_data=data,
+                user_id=user_id,
+                chat_id=chat_id,
+                request_id=f"tiktok_guest_audio:{info.id}",
+            )
+            if audio_metrics and audio_metrics.size < MAX_FILE_SIZE:
+                entries.append(
+                    {
+                        "kind": "audio",
+                        "path": audio_metrics.path,
+                        "file_id": None,
+                        "url": None,
+                        "cached": False,
+                        "title": info.description or "TikTok audio",
+                        "performer": f"@{info.author}" if info.author else None,
+                        "duration": info.duration_seconds or None,
+                    }
+                )
+            elif audio_metrics:
+                await remove_file(audio_metrics.path)
+
+        return entries, info.description or ""
+
     name = f"{info.id}_{timestamp}_guest_tiktok.mp4"
     metrics = await tiktok_service.download_video(
-        build_tiktok_video_url(info),
+        video_url,
         name,
         download_data=data,
         request_id=f"tiktok_guest:{info.id}",
@@ -111,7 +158,7 @@ async def _resolve_tiktok(url: str, *, user_id: int | None, chat_id: int | None)
     if not metrics:
         return [], ""
 
-    return [{"kind": "video", "path": metrics.path, "file_id": None, "url": build_tiktok_video_url(info), "cached": False}], info.description or ""
+    return [{"kind": "video", "path": metrics.path, "file_id": None, "url": video_url, "cached": False}], info.description or ""
 
 
 async def _resolve_instagram(url: str, *, user_id: int | None, chat_id: int | None) -> tuple[list[dict[str, Any]], str]:
@@ -298,6 +345,11 @@ def _cached_entries(service: str, url: str) -> list[dict[str, Any]]:
                 "file_id": str(entry["file_id"]),
                 "url": None,
                 "cached": True,
+                **{
+                    field: entry[field]
+                    for field in ("title", "performer", "duration", "caption")
+                    if entry.get(field) not in (None, "")
+                },
             })
     return result
 
@@ -308,7 +360,15 @@ def _remember_guest_entries(service: str, url: str, entries: list[dict[str, Any]
         "service": service,
         "source": str(url),
         "entries": [
-            {"kind": e.get("kind"), "file_id": str(e["file_id"])}
+            {
+                "kind": e.get("kind"),
+                "file_id": str(e["file_id"]),
+                **{
+                    field: e[field]
+                    for field in ("title", "performer", "duration", "caption")
+                    if e.get(field) not in (None, "")
+                },
+            }
             for e in entries
             if isinstance(e, dict) and e.get("file_id")
         ],
@@ -329,24 +389,36 @@ async def _upload_guest_entries(message: types.Message, entries: list[dict[str, 
             continue
 
         path = entry.get("path")
-        if not path:
-            raise RuntimeError("Guest media entry has no local path")
+        url = entry.get("url")
+        if not path and not url:
+            raise RuntimeError("Guest media entry has no local path or URL")
 
+        media = types.FSInputFile(str(path)) if path else str(url)
         kind = str(entry.get("kind", "")).lower()
         if kind == "video":
             sent = await message.bot.send_video(
                 chat_id=CHANNEL_ID,
-                video=types.FSInputFile(str(path)),
+                video=media,
                 disable_notification=True,
             )
             file_id = sent.video.file_id if sent.video else None
         elif kind == "photo":
             sent = await message.bot.send_photo(
                 chat_id=CHANNEL_ID,
-                photo=types.FSInputFile(str(path)),
+                photo=media,
                 disable_notification=True,
             )
             file_id = sent.photo[-1].file_id if sent.photo else None
+        elif kind == "audio":
+            sent = await message.bot.send_audio(
+                chat_id=CHANNEL_ID,
+                audio=media,
+                title=entry.get("title"),
+                performer=entry.get("performer"),
+                duration=entry.get("duration"),
+                disable_notification=True,
+            )
+            file_id = sent.audio.file_id if sent.audio else None
         else:
             continue
 
