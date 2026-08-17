@@ -120,7 +120,20 @@ async def test_guest_tiktok_photo_post_keeps_images_and_original_audio(monkeypat
         author="creator",
         duration_seconds=12,
     )
+    downloader = SimpleNamespace(
+        download=AsyncMock(
+            side_effect=[
+                SimpleNamespace(path="/tmp/photo-1.jpg"),
+                SimpleNamespace(path="/tmp/photo-2.jpg"),
+            ]
+        )
+    )
     service = SimpleNamespace(
+        _downloader=downloader,
+        _build_direct_download_headers=lambda *_args: {
+            "User-Agent": "test-agent",
+            "Referer": "https://www.tiktok.com/",
+        },
         download_audio=AsyncMock(
             return_value=SimpleNamespace(path="/tmp/tiktok-audio.mp3", size=1024)
         ),
@@ -162,9 +175,14 @@ async def test_guest_tiktok_photo_post_keeps_images_and_original_audio(monkeypat
 
     assert description == "Photo post"
     assert [entry["kind"] for entry in entries] == ["photo", "photo", "audio"]
-    assert entries[0]["url"] == "https://example.com/photo-1.jpg"
+    assert entries[0]["path"] == "/tmp/photo-1.jpg"
+    assert entries[0]["url"] is None
     assert entries[-1]["path"] == "/tmp/tiktok-audio.mp3"
     assert entries[-1]["performer"] == "@creator"
+    assert downloader.download.await_count == 2
+    assert downloader.download.await_args_list[0].kwargs["headers"]["Referer"] == (
+        "https://www.tiktok.com/"
+    )
     service.download_audio.assert_awaited_once()
     service.download_video.assert_not_awaited()
 
