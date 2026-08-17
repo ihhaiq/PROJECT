@@ -108,17 +108,46 @@ async def _resolve_tiktok(url: str, *, user_id: int | None, chat_id: int | None)
     # Mode: keep the original image(s) and soundtrack as separate Rich Message
     # blocks, matching delivery when the bot is an administrator.
     if images:
-        entries: list[dict[str, Any]] = [
-            {
-                "kind": "photo",
-                "path": None,
-                "file_id": None,
-                "url": str(image_url),
-                "cached": False,
-            }
-            for image_url in images
-            if image_url
-        ]
+        source_data = data.get("data", {})
+        image_headers = tiktok_service._build_direct_download_headers(
+            clean_url,
+            source_data,
+            "download_headers",
+        )
+        entries: list[dict[str, Any]] = []
+        for index, image_url in enumerate(images):
+            if not image_url:
+                continue
+            image_name = f"{info.id}_{timestamp}_guest_tiktok_{index}.jpg"
+            try:
+                image_metrics = await tiktok_service._downloader.download(
+                    str(image_url),
+                    image_name,
+                    headers=image_headers,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    source="tiktok",
+                    request_id=f"tiktok_guest_photo:{info.id}:{index}",
+                    max_size_bytes=MAX_FILE_SIZE,
+                )
+            except Exception as exc:
+                logging.warning(
+                    "TikTok Guest photo download failed: index=%s url=%s error=%s",
+                    index,
+                    summarize_url_for_log(str(image_url)),
+                    exc,
+                )
+                continue
+
+            entries.append(
+                {
+                    "kind": "photo",
+                    "path": image_metrics.path,
+                    "file_id": None,
+                    "url": None,
+                    "cached": False,
+                }
+            )
 
         if entries and info.music_play_url:
             audio_name = f"{info.id}_{timestamp}_guest_tiktok_audio.mp3"
@@ -425,6 +454,8 @@ async def _upload_guest_entries(message: types.Message, entries: list[dict[str, 
         if not file_id:
             raise RuntimeError(f"Telegram did not return file_id for Guest {kind}")
         uploaded.append({**entry, "file_id": file_id, "path": None, "url": None, "cached": True})
+        if path:
+            await remove_file(str(path))
 
     if not uploaded:
         raise RuntimeError("No usable Guest media entries")
