@@ -1,19 +1,3 @@
-"""
-Guest Mode media delivery.
-
-Telegram 9.6+ sends messages in chats where the bot is not a member as the
-dedicated `guest_message` update. This module therefore registers on
-`router.guest_message`, not `router.message`.
-
-Supported rich layouts:
-- multiple photos -> Slideshow
-- video -> Details / Toggle block
-- mixed photo/video posts -> Slideshow + Details blocks
-
-The normal message handlers keep their existing behaviour; this module only
-handles guest_message updates.
-"""
-
 from __future__ import annotations
 
 import datetime
