@@ -175,9 +175,13 @@ async def _send_with_reaction(
             skip_if_business=skip_if_business,
         )
 
-    responder = getattr(message, method, None)
+    chat_type = getattr(getattr(message, "chat", None), "type", None)
+    is_channel = getattr(chat_type, "value", chat_type) == "channel"
+    resolved_method = "answer" if is_channel and method == "reply" else method
+
+    responder = getattr(message, resolved_method, None)
     if not responder:
-        raise AttributeError(f"Message object has no method '{method}'")
+        raise AttributeError(f"Message object has no method '{resolved_method}'")
 
     try:
         await responder(text, **kwargs)

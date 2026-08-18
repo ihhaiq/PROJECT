@@ -414,10 +414,10 @@ async def test_send_cached_media_entries_probes_all_batch_videos_and_caches_grou
     }
 
 
-def _make_sender_message():
+def _make_sender_message(*, chat_type="private"):
     return SimpleNamespace(
         message_id=42,
-        chat=SimpleNamespace(id=123),
+        chat=SimpleNamespace(id=123, type=chat_type),
         bot=SimpleNamespace(
             send_rich_message=AsyncMock(
                 return_value=SimpleNamespace(message_id=777, rich_message=object())
@@ -429,6 +429,16 @@ def _make_sender_message():
             )
         ),
         reply_document=AsyncMock(
+            return_value=SimpleNamespace(
+                document=SimpleNamespace(file_id="doc-file-id"), video=None
+            )
+        ),
+        answer_video=AsyncMock(
+            return_value=SimpleNamespace(
+                document=None, video=SimpleNamespace(file_id="video-file-id")
+            )
+        ),
+        answer_document=AsyncMock(
             return_value=SimpleNamespace(
                 document=SimpleNamespace(file_id="doc-file-id"), video=None
             )
@@ -534,3 +544,55 @@ async def test_make_video_or_document_senders_sends_downloaded_video(monkeypatch
     assert isinstance(kwargs["video"], FSInputFile)
     assert kwargs["width"] == 640
     assert kwargs["height"] == 360
+
+
+@pytest.mark.asyncio
+async def test_make_video_or_document_senders_channel_video_does_not_reply(monkeypatch):
+    monkeypatch.setattr(
+        delivery,
+        "build_video_send_kwargs",
+        AsyncMock(return_value={"width": 640, "height": 360}),
+    )
+    message = _make_sender_message(chat_type="channel")
+    _send_cached, send_downloaded, _extract_file_id = (
+        delivery.make_video_or_document_senders(
+            message,
+            caption="caption",
+            reply_markup_fn=lambda: None,
+            as_document=False,
+            cached_log_label="TikTok video",
+        )
+    )
+
+    await send_downloaded("/tmp/video.mp4")
+
+    message.answer_video.assert_awaited_once()
+    message.reply_video.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_cached_rich_video_channel_omits_reply_parameters():
+    message = _make_sender_message(chat_type="channel")
+
+    await delivery.send_cached_video_details(
+        message,
+        file_id="cached-file-id",
+        caption="caption",
+    )
+
+    kwargs = message.bot.send_rich_message.await_args.kwargs
+    assert "reply_parameters" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_cached_rich_video_private_keeps_reply_parameters():
+    message = _make_sender_message(chat_type="private")
+
+    await delivery.send_cached_video_details(
+        message,
+        file_id="cached-file-id",
+        caption="caption",
+    )
+
+    kwargs = message.bot.send_rich_message.await_args.kwargs
+    assert kwargs["reply_parameters"].message_id == message.message_id

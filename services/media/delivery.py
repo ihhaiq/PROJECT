@@ -19,6 +19,18 @@ logging = logging.bind(service="media_delivery")
 AUDIO_CACHE_VARIANT = "audio_artist_dedupe_v5"
 
 
+def _is_channel_message(message: types.Message) -> bool:
+    """Channel posts cannot reliably be used as reply targets."""
+    chat_type = getattr(getattr(message, "chat", None), "type", None)
+    return getattr(chat_type, "value", chat_type) == "channel"
+
+
+def _message_sender(message: types.Message, answer_name: str, reply_name: str):
+    """Use a standalone send for channels and a reply everywhere else."""
+    method_name = answer_name if _is_channel_message(message) else reply_name
+    return getattr(message, method_name)
+
+
 def build_audio_cache_key(source_url: str) -> str:
     return f"{source_url}#{AUDIO_CACHE_VARIANT}"
 
@@ -267,7 +279,10 @@ def make_video_or_document_senders(
         )
         try:
             if as_document:
-                return await message.reply_document(
+                send_document = _message_sender(
+                    message, "answer_document", "reply_document"
+                )
+                return await send_document(
                     document=file_id,
                     caption=caption,
                     reply_markup=reply_markup_fn(),
@@ -285,14 +300,18 @@ def make_video_or_document_senders(
 
     async def send_downloaded(path: str) -> types.Message:
         if as_document:
-            return await message.reply_document(
+            send_document = _message_sender(
+                message, "answer_document", "reply_document"
+            )
+            return await send_document(
                 document=FSInputFile(path),
                 caption=caption,
                 reply_markup=reply_markup_fn(),
                 parse_mode=parse_mode,
                 disable_content_type_detection=True,
             )
-        return await message.reply_video(
+        send_video = _message_sender(message, "answer_video", "reply_video")
+        return await send_video(
             video=FSInputFile(path),
             caption=caption,
             reply_markup=reply_markup_fn(),
@@ -358,8 +377,11 @@ async def send_cached_video_details(
             "chat_id": message.chat.id,
             "rich_message": rich_message,
             "reply_markup": reply_markup,
-            "reply_parameters": ReplyParameters(message_id=message.message_id),
         }
+        if not _is_channel_message(message):
+            send_kwargs["reply_parameters"] = ReplyParameters(
+                message_id=message.message_id
+            )
         business_connection_id = getattr(message, "business_connection_id", None)
         if business_connection_id:
             send_kwargs["business_connection_id"] = business_connection_id
@@ -372,7 +394,8 @@ async def send_cached_video_details(
             getattr(message, "message_id", None),
             exc,
         )
-        return await message.reply_video(
+        send_video = _message_sender(message, "answer_video", "reply_video")
+        return await send_video(
             video=file_id,
             caption=caption,
             reply_markup=reply_markup,
@@ -450,8 +473,11 @@ async def _send_rich_media_for_message(
             "chat_id": message.chat.id,
             "rich_message": rich_message,
             "reply_markup": reply_markup,
-            "reply_parameters": ReplyParameters(message_id=message.message_id),
         }
+        if not _is_channel_message(message):
+            send_kwargs["reply_parameters"] = ReplyParameters(
+                message_id=message.message_id
+            )
         business_connection_id = getattr(message, "business_connection_id", None)
         if business_connection_id:
             send_kwargs["business_connection_id"] = business_connection_id
@@ -576,7 +602,7 @@ async def send_cached_media_entries(
                     media_group.add_photo(media=media_ref)
 
             send_kwargs = {"media": media_group.build()}
-            if not has_sent_media:
+            if not has_sent_media and not _is_channel_message(message):
                 send_kwargs["reply_to_message_id"] = message.message_id
             sent_group = await message.answer_media_group(**send_kwargs)
             has_sent_media = True
@@ -610,14 +636,26 @@ async def send_cached_media_entries(
 
     if as_document:
         send_kwargs["disable_content_type_detection"] = True
-        send_doc = message.answer_document if has_sent_media else message.reply_document
+        send_doc = (
+            message.answer_document
+            if has_sent_media or _is_channel_message(message)
+            else message.reply_document
+        )
         sent_message = await send_doc(document=media_ref, **send_kwargs)
     elif media_kind == "video":
         send_kwargs.update(await build_video_send_kwargs(str(last_entry.get(path_key)) if last_entry.get(path_key) else None))
-        send_video = message.answer_video if has_sent_media else message.reply_video
+        send_video = (
+            message.answer_video
+            if has_sent_media or _is_channel_message(message)
+            else message.reply_video
+        )
         sent_message = await send_video(video=media_ref, **send_kwargs)
     else:
-        send_photo = message.answer_photo if has_sent_media else message.reply_photo
+        send_photo = (
+            message.answer_photo
+            if has_sent_media or _is_channel_message(message)
+            else message.reply_photo
+        )
         sent_message = await send_photo(photo=media_ref, **send_kwargs)
 
     await _cache_sent_entry(

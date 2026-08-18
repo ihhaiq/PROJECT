@@ -388,6 +388,21 @@ async def test_send_with_reaction_invokes_reply(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_with_reaction_uses_answer_for_channel(monkeypatch):
+    monkeypatch.setattr(telegram_ui_utils, "react_to_message", AsyncMock())
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type="channel"),
+        answer=AsyncMock(),
+        reply=AsyncMock(),
+    )
+
+    await utils._send_with_reaction(message, "hello")
+
+    message.answer.assert_awaited_once_with("hello")
+    message.reply.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_send_with_reaction_requires_method():
     with pytest.raises(AttributeError):
         await utils._send_with_reaction(SimpleNamespace(), "hello")
